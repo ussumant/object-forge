@@ -89,6 +89,8 @@ Import \`ObjectModel\` from \`src/ObjectModel.tsx\` inside a React Three Fiber \
 
 Named parts, sockets, colliders, and future interaction anchors are exposed at \`root.userData.sculptRuntime\`. V1 does not attach click behavior or video screens.
 
+Confirmed package text and decals are exposed under \`root.userData.sculptRuntime.labels\`. Local label assets are included in the \`assets/\` directory; no source video or full reference photograph is exported.
+
 ## Cleanup
 
 Traverse the returned group and dispose geometries, materials, and textures when unmounting it. The React wrapper includes a basic cleanup example.
@@ -136,6 +138,10 @@ export async function buildProjectExport(store: ProjectStore, project: CreatorPr
   const specPath = resolve(workspace, 'object-sculpt-spec.json');
   if (await stat(specPath).then(() => true).catch(() => false)) {
     await writeFile(resolve(exportDir, 'object-sculpt-spec.json'), await readFile(specPath));
+  }
+  const labelEvidencePath = resolve(workspace, 'label-evidence.json');
+  if (await stat(labelEvidencePath).then(() => true).catch(() => false)) {
+    await writeFile(resolve(exportDir, 'label-evidence.json'), await readFile(labelEvidencePath));
   }
   const assetsPath = resolve(workspace, 'assets');
   if (await stat(assetsPath).then((entry) => entry.isDirectory()).catch(() => false)) {

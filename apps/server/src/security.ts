@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { dirname, resolve, sep } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { dirname, extname, resolve, sep } from 'node:path';
 import { build } from 'esbuild';
 import { ROOT_DIR } from './paths.js';
 
@@ -19,6 +19,7 @@ const BANNED_PATTERNS: Array<{ pattern: RegExp; message: string }> = [
 ];
 
 const IMPORT_PATTERN = /(?:import|export)\s+(?:[^'\"]*?\s+from\s+)?['\"]([^'\"]+)['\"]/g;
+const LOCAL_ASSET_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 function stripComments(source: string): string {
   let result = '';
@@ -86,7 +87,7 @@ export function scanGeneratedSource(source: string): SafetyViolation[] {
     if (specifier.startsWith('node:')) {
       const line = source.slice(0, match.index).split('\n').length;
       violations.push({ line, message: 'Node.js modules are not allowed in browser models' });
-    } else if (specifier !== 'three' && !specifier.startsWith('./')) {
+    } else if (specifier !== 'three' && !specifier.startsWith('./') && !specifier.startsWith('../assets/')) {
       const line = source.slice(0, match.index).split('\n').length;
       violations.push({ line, message: `import ${JSON.stringify(specifier)} is not allowed` });
     } else if (specifier === 'three' && !/import\s+\*\s+as\s+THREE\s+from/.test(match[0])) {
@@ -110,6 +111,18 @@ export async function validateAndBundleModel(entryPath: string, outputPath: stri
   const workspace = dirname(dirname(entryPath));
   const resolvedEntry = resolve(entryPath);
   if (!resolvedEntry.startsWith(`${workspace}${sep}`)) throw new Error('Generated model entry escaped its run workspace.');
+  for (const match of source.matchAll(IMPORT_PATTERN)) {
+    const specifier = match[1] ?? '';
+    if (!specifier.startsWith('../assets/')) continue;
+    const assetPath = resolve(dirname(entryPath), specifier);
+    const assetsRoot = resolve(workspace, 'assets');
+    if (!assetPath.startsWith(`${assetsRoot}${sep}`) || !LOCAL_ASSET_EXTENSIONS.has(extname(assetPath).toLowerCase())) {
+      throw new Error(`Generated model referenced a disallowed local asset: ${specifier}`);
+    }
+    const asset = await stat(assetPath).catch(() => undefined);
+    if (!asset?.isFile()) throw new Error(`Generated model referenced a missing local asset: ${specifier}`);
+    if (asset.size > 5 * 1024 * 1024) throw new Error(`Generated model asset exceeds 5 MB: ${specifier}`);
+  }
   const runtimeSource = source.replace(
     /import\s+\*\s+as\s+THREE\s+from\s+['\"]three['\"];?/,
     'const THREE = globalThis.__IMG3D_THREE__;',
@@ -131,6 +144,12 @@ export async function validateAndBundleModel(entryPath: string, outputPath: stri
     sourcemap: false,
     logLevel: 'silent',
     legalComments: 'none',
+    loader: {
+      '.png': 'dataurl',
+      '.jpg': 'dataurl',
+      '.jpeg': 'dataurl',
+      '.webp': 'dataurl',
+    },
     nodePaths: [resolve(ROOT_DIR, 'node_modules')],
   });
 }

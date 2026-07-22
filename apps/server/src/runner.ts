@@ -81,6 +81,23 @@ async function collectReviewArtifacts(workDir: string): Promise<RunArtifact[]> {
     }));
 }
 
+async function validateConfirmedLabels(workDir: string, project: CreatorProject, kind: RunKind): Promise<void> {
+  if (kind === 'draft' || project.surfaceTexts.length === 0) return;
+  const source = await readFile(resolve(workDir, 'src/createModel.ts'), 'utf8');
+  const evidencePath = resolve(workDir, 'label-evidence.json');
+  if (!(await exists(evidencePath))) throw new Error('Finished model omitted label-evidence.json.');
+  const evidence = JSON.parse(await readFile(evidencePath, 'utf8')) as {
+    renderings?: Array<{ evidenceId?: string; text?: string; nodeName?: string; method?: string }>;
+  };
+  for (const text of project.surfaceTexts) {
+    if (!source.includes(text.value)) throw new Error(`Finished model omitted confirmed text: ${text.value}`);
+    const rendering = evidence.renderings?.find((item) => item.evidenceId === text.id);
+    if (!rendering?.nodeName || rendering.text !== text.value || !rendering.method) {
+      throw new Error(`Finished model did not verify label placement for: ${text.value}`);
+    }
+  }
+}
+
 export class RunManager {
   private readonly activeAdapters = new Map<string, GeneratorAdapter>();
   private readonly canceled = new Set<string>();
@@ -231,6 +248,7 @@ export class RunManager {
 
       const modelPath = resolve(workDir, 'src/createModel.ts');
       if (!(await exists(modelPath))) throw new Error('The provider completed without writing src/createModel.ts.');
+      await validateConfirmedLabels(workDir, freshProject, runSnapshot.kind);
       const bundleDir = resolve(runDir, 'bundle');
       await mkdir(bundleDir, { recursive: true });
       const bundlePath = resolve(bundleDir, 'model.js');
@@ -245,6 +263,9 @@ export class RunManager {
       }
       if (await exists(resolve(workDir, 'provider.jsonl'))) {
         artifacts.push({ kind: 'log', path: 'workspace/provider.jsonl', createdAt: now() });
+      }
+      if (await exists(resolve(workDir, 'label-evidence.json'))) {
+        artifacts.push({ kind: 'label', path: 'workspace/label-evidence.json', createdAt: now() });
       }
       artifacts.push(...await collectReviewArtifacts(workDir));
       await this.store.updateRun(projectId, runId, {
@@ -319,6 +340,19 @@ export class RunManager {
       }
     }
 
+    const labelAssetsDir = resolve(workDir, 'assets/labels');
+    const labels = project.surfaceTexts.filter((item) => item.assetFilename && item.exportAllowed);
+    if (labels.length) await mkdir(labelAssetsDir, { recursive: true });
+    for (const label of labels) {
+      const source = resolve(this.store.captureDir(project.id, label.captureId), 'labels', label.assetFilename!);
+      if (await exists(source)) await cp(source, resolve(labelAssetsDir, label.assetFilename!));
+    }
+    await writeFile(resolve(workDir, 'label-evidence.json'), `${JSON.stringify({
+      version: '1.0',
+      confirmedTexts: project.surfaceTexts,
+      renderings: [],
+    }, null, 2)}\n`, 'utf8');
+
     await writeFile(resolve(workDir, 'capture-manifest.json'), `${JSON.stringify({
       projectId: project.id,
       targetName: project.name,
@@ -333,6 +367,7 @@ export class RunManager {
         width: item.width,
         height: item.height,
       })),
+      surfaceTexts: project.surfaceTexts,
     }, null, 2)}\n`, 'utf8');
   }
 }

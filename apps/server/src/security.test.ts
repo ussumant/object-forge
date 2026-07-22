@@ -1,5 +1,9 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { scanGeneratedSource } from './security.js';
+import { scanGeneratedSource, validateAndBundleModel } from './security.js';
 
 describe('scanGeneratedSource', () => {
   it('accepts a code-only Three.js factory', () => {
@@ -40,5 +44,29 @@ describe('scanGeneratedSource', () => {
   ])('rejects %s', (line, expected) => {
     const violations = scanGeneratedSource(`import * as THREE from 'three';\n${line}`);
     expect(violations.some((item) => item.message.includes(expected))).toBe(true);
+  });
+
+  it('bundles an approved local label asset as self-contained data', async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), 'img3d-label-security-'));
+    try {
+      await mkdir(resolve(directory, 'src'), { recursive: true });
+      await mkdir(resolve(directory, 'assets/labels'), { recursive: true });
+      await sharp({ create: { width: 8, height: 8, channels: 3, background: '#1674ba' } })
+        .png().toFile(resolve(directory, 'assets/labels/label.png'));
+      const entry = resolve(directory, 'src/createModel.ts');
+      await writeFile(entry, `import * as THREE from 'three';
+import labelUrl from '../assets/labels/label.png';
+export function createLabelModel() {
+  const root = new THREE.Group();
+  root.userData.labelUrl = labelUrl;
+  return root;
+}\n`);
+      const output = resolve(directory, 'model.js');
+      await validateAndBundleModel(entry, output);
+      const bundled = await import('node:fs/promises').then(({ readFile }) => readFile(output, 'utf8'));
+      expect(bundled).toContain('data:image/png;base64');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

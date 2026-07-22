@@ -99,6 +99,35 @@ describe('local creator API', () => {
     expect(accepted.json().project.references[0].captureProvenance.captureId).toBe(captureId);
     expect(accepted.json().project.surfaceTexts[0]).toMatchObject({ value: 'POCARI SWEAT', renderingMethod: 'hybrid-decal' });
     expect(accepted.json().project.captures[0].status).toBe('ready');
+    const draft = await app.inject({
+      method: 'POST', url: `/api/projects/${projectId}/runs`,
+      payload: { provider: 'codex', kind: 'draft', acceptApproximation: true },
+    });
+    const draftId = draft.json().run.id as string;
+    let activeDraft = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 30));
+      const state = await app.inject({ method: 'GET', url: `/api/projects/${projectId}` });
+      activeDraft = state.json().project.activeRunId === draftId;
+      if (activeDraft) break;
+    }
+    expect(activeDraft).toBe(true);
+    const finish = await app.inject({
+      method: 'POST', url: `/api/projects/${projectId}/runs`,
+      payload: { provider: 'codex', kind: 'finish', sourceRunId: draftId },
+    });
+    const finishId = finish.json().run.id as string;
+    let finished = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 30));
+      const state = await app.inject({ method: 'GET', url: `/api/projects/${projectId}` });
+      finished = state.json().project.activeRunId === finishId;
+      if (finished) break;
+    }
+    expect(finished).toBe(true);
+    const model = await app.inject({ method: 'GET', url: `/api/projects/${projectId}/runs/${finishId}/model.js` });
+    expect(model.body).toContain('POCARI SWEAT');
+    expect(model.body).toContain('confirmed-label-decal');
     await app.close();
   });
 

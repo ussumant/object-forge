@@ -129,7 +129,7 @@ export type SuitabilityReport = {
 };
 
 export type RunArtifact = {
-  kind: 'spec' | 'model' | 'preview' | 'comparison' | 'log' | 'export';
+  kind: 'spec' | 'model' | 'preview' | 'comparison' | 'log' | 'export' | 'label';
   path: string;
   createdAt: string;
 };

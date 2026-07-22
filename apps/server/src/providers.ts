@@ -241,7 +241,7 @@ export function buildProviderCommand(
   return { command: 'claude', args };
 }
 
-function modelSource(name: string, finished: boolean, feedback?: string): string {
+function modelSource(name: string, finished: boolean, feedback?: string, surfaceTexts: string[] = []): string {
   const note = feedback ? `Applied refinement: ${feedback.replace(/[`$]/g, '').slice(0, 160)}` : 'Generated local preview';
   return `import * as THREE from 'three';
 
@@ -263,6 +263,7 @@ export function create${name}Model(options: ModelOptions = {}): THREE.Group {
   });
   const dark = new THREE.MeshStandardMaterial({ color: 0x171917, roughness: 0.44, metalness: 0.5, wireframe: options.wireframe ?? false });
   const accent = new THREE.MeshStandardMaterial({ color: 0xff5a2a, roughness: 0.32, metalness: 0.24, wireframe: options.wireframe ?? false });
+  const labels: Record<string, THREE.Object3D> = {};
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.9, 1.25, 6, 4, 4), material);
   body.geometry.translate(0, 0.08, 0);
@@ -309,7 +310,34 @@ export function create${name}Model(options: ModelOptions = {}): THREE.Group {
   root.add(screenSocket);
   sockets.screen = screenSocket;
 
-  root.userData.sculptRuntime = { nodes, meshes, sockets, colliders: {}, destructionGroups: {} };
+  const confirmedLabelTexts = ${JSON.stringify(surfaceTexts)};
+  if (confirmedLabelTexts.length > 0) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 256;
+    const context = canvas.getContext('2d');
+    if (context) {
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = '#1674ba';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.font = '700 76px Arial, sans-serif';
+      context.fillText(confirmedLabelTexts.join(' · '), canvas.width / 2, canvas.height / 2, 940);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const labelMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: false });
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 0.62), labelMaterial);
+    label.position.set(0.2, -0.48, 0.762);
+    label.name = 'confirmed-label-decal';
+    root.add(label);
+    nodes.label = label;
+    meshes.label = label;
+    labels.primary = label;
+  }
+
+  root.userData.sculptRuntime = { nodes, meshes, sockets, labels, colliders: {}, destructionGroups: {} };
   root.userData.note = ${JSON.stringify(note)};
   return root;
 }
@@ -344,9 +372,26 @@ export class FakeGeneratorAdapter implements GeneratorAdapter {
     await mkdir(resolve(context.workDir, 'src'), { recursive: true });
     await writeFile(
       resolve(context.workDir, 'src/createModel.ts'),
-      modelSource(safeName, context.run.kind !== 'draft', context.run.feedback),
+      modelSource(
+        safeName,
+        context.run.kind !== 'draft',
+        context.run.feedback,
+        context.run.kind === 'draft' ? [] : context.project.surfaceTexts.map((item) => item.value),
+      ),
       'utf8',
     );
+    if (context.run.kind !== 'draft' && context.project.surfaceTexts.length) {
+      await writeFile(resolve(context.workDir, 'label-evidence.json'), `${JSON.stringify({
+        version: '1.0',
+        confirmedTexts: context.project.surfaceTexts,
+        renderings: context.project.surfaceTexts.map((item) => ({
+          evidenceId: item.id,
+          text: item.value,
+          nodeName: 'confirmed-label-decal',
+          method: 'canvas-texture',
+        })),
+      }, null, 2)}\n`, 'utf8');
+    }
     await writeFile(resolve(context.workDir, 'object-sculpt-spec.json'), `${JSON.stringify({
       version: '1.0',
       targetName: context.project.name,

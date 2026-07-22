@@ -3,6 +3,9 @@ import { ROOT_DIR } from './paths.js';
 
 export function buildGenerationPrompt(context: Omit<RunContext, 'prompt'>, acceptApproximation: boolean): string {
   const references = context.referencePaths.map((item) => `- ${item.role}: ${item.path}`).join('\n');
+  const confirmedTexts = context.project.surfaceTexts.length
+    ? context.project.surfaceTexts.map((item) => `- ${JSON.stringify(item.value)} (evidence id ${item.id}, method ${item.renderingMethod}${item.assetFilename ? `, local asset assets/labels/${item.assetFilename}` : ''})`).join('\n')
+    : '- none confirmed';
   const stageInstruction = context.run.kind === 'draft'
     ? 'Complete intake, assessment/spec, blockout, structural-pass, and form-refinement. Stop before material-pass.'
     : context.run.kind === 'finish'
@@ -23,6 +26,9 @@ Approximation of hidden geometry accepted: ${acceptApproximation ? 'yes' : 'no'}
 References:
 ${references}
 
+Confirmed surface text:
+${confirmedTexts}
+
 ${stageInstruction}
 
 Requirements:
@@ -34,6 +40,8 @@ Requirements:
 6. Preserve stable named nodes, pivots, sockets, and root.userData.sculptRuntime. Do not implement clickable or video behavior.
 7. Do not include source photographs in the generated model unless a projected texture is essential and explicitly recorded in object-sculpt-spec.json.
 8. Finish by writing run-result.json with status succeeded or needs_input, a short summary, and any requestedViews.
+9. For finish/refine runs, every confirmed surface-text phrase must appear exactly and visibly in the model. Use a THREE.CanvasTexture/vector text layer for exact wording, optionally combined with its approved local crop. Never rely on OCR guesses or external fonts.
+10. Keep label nodes stable and expose them under root.userData.sculptRuntime.labels. Update label-evidence.json renderings with each evidence id, exact text, nodeName, and method. If exact text cannot be rendered, return needs_input instead of succeeding.
 
 Local verification tools:
 - Dependencies are already installed at ${ROOT_DIR}/node_modules and resolve from this nested workspace. Do not run npm install and do not treat a missing workspace-local node_modules directory as a blocker.
