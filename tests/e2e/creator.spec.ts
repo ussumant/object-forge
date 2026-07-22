@@ -1,0 +1,48 @@
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import sharp from 'sharp';
+import { expect, test } from '@playwright/test';
+
+const fixturePath = resolve('output/playwright/reference-fixture.png');
+
+test.beforeAll(async () => {
+  await mkdir(resolve('output/playwright'), { recursive: true });
+  await sharp({ create: { width: 900, height: 700, channels: 3, background: '#c8c4b9' } })
+    .composite([
+      { input: Buffer.from('<svg width="520" height="340"><rect x="20" y="50" width="480" height="250" rx="35" fill="#34362f"/><circle cx="295" cy="175" r="90" fill="#d4d2c8"/><circle cx="295" cy="175" r="55" fill="#20221d"/><rect x="80" y="20" width="110" height="65" rx="12" fill="#ef5f35"/></svg>'), left: 190, top: 170 },
+    ])
+    .png()
+    .toFile(fixturePath);
+});
+
+test('capture, draft, finish, refine, reload, and export', async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  const name = `Fixture camera ${Date.now()}`;
+  await page.goto('/');
+  await page.getByLabel('What are we rebuilding?').fill(name);
+  await page.getByRole('button', { name: 'Create object project' }).click();
+  await expect(page.getByText(name, { exact: true })).toBeVisible();
+
+  const chooser = page.locator('input[type=file]');
+  await chooser.setInputFiles(fixturePath);
+  await expect(page.getByRole('heading', { name: 'Isolate the object' })).toBeVisible();
+  await page.getByRole('button', { name: 'Add to capture pack' }).click();
+  await expect(page.getByText('conditional capture')).toBeVisible();
+  await page.getByText('I accept inferred geometry for unseen sides or the underside.').click();
+  await page.getByRole('button', { name: 'Generate structural draft' }).click();
+  await expect(page.getByText(/draft · Codex/i)).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole('button', { name: 'Finish materials + light' }).click();
+  await expect(page.getByText(/finish · Codex/i)).toBeVisible({ timeout: 15_000 });
+  await page.getByLabel(/Directed refinement/).fill('Make the shutter button larger.');
+  await page.getByRole('button', { name: 'Create refinement run' }).click();
+  await expect(page.getByText(/refine · Codex/i)).toBeVisible({ timeout: 15_000 });
+
+  await page.reload();
+  await expect(page.getByText(/active model ready/i)).toBeVisible();
+  const download = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Export' }).click();
+  expect((await download).suggestedFilename()).toContain('threejs.zip');
+  expect(consoleErrors).toEqual([]);
+});

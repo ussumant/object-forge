@@ -1,0 +1,27 @@
+{
+  "name": "image-to-3d-creator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "predev": "npm run build -w @img3d/shared",
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w @img3d/shared && npm run build -w @img3d/server && npm run build -w @img3d/web",
+    "typecheck": "npm run build -w @img3d/shared && npm run typecheck -w @img3d/server && npm run typecheck -w @img3d/web",
+    "test": "npm run build -w @img3d/shared && vitest run",
+    "test:watch": "vitest",
+    "pretest:e2e": "npm run build -w @img3d/shared",
+    "test:e2e": "playwright test",
+    "start": "npm run start -w @img3d/server"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "@types/node": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}

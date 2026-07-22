@@ -1,0 +1,28 @@
+{
+  "name": "@img3d/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "latest",
+    "@fastify/multipart": "latest",
+    "@fastify/static": "latest",
+    "@img3d/shared": "0.1.0",
+    "archiver": "latest",
+    "esbuild": "latest",
+    "fastify": "latest",
+    "nanoid": "latest",
+    "sharp": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/archiver": "latest",
+    "tsx": "latest"
+  }
+}
