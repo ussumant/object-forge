@@ -23,6 +23,7 @@ import {
   Sparkles,
   Trash2,
   TriangleAlert,
+  Video,
   X,
 } from 'lucide-react';
 import type {
@@ -34,9 +35,11 @@ import type {
   ReferenceImage,
   ReferenceRole,
   RunPhase,
+  VideoCapture,
 } from '@img3d/shared';
 import { api, artifactUrl, modelUrl, referenceUrl } from './api';
 import { UploadModal } from './UploadModal';
+import { VideoCaptureReview } from './VideoCaptureReview';
 
 const Viewer = lazy(() => import('./Viewer').then((module) => ({ default: module.Viewer })));
 
@@ -190,7 +193,7 @@ function Library({ providers }: { providers: ProviderHealth[] }) {
               autoComplete="off"
               maxLength={100}
             />
-            <p>Start with one clear hero photo. Add side and back views when the shape matters.</p>
+            <p>Recommended: upload one short phone video. We’ll choose the useful views and read the label for you.</p>
             {error && <span className="inline-error">{error}</span>}
             <button className="primary-button wide" disabled={creating || !name.trim()}>
               {creating ? <LoaderCircle className="spin" size={18} /> : <Plus size={18} />}
@@ -253,6 +256,10 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
   const [error, setError] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<Provider>('codex');
   const [uploadFile, setUploadFile] = useState<File>();
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [showCaptureReview, setShowCaptureReview] = useState(false);
+  const [autoOpenedCaptureId, setAutoOpenedCaptureId] = useState<string>();
+  const [captureHealth, setCaptureHealth] = useState<{ available: boolean; message: string }>();
   const [wireframe, setWireframe] = useState(false);
   const [background, setBackground] = useState<'graphite' | 'bone' | 'studio'>('graphite');
   const [resetKey, setResetKey] = useState(0);
@@ -263,6 +270,13 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
   const [startingRun, setStartingRun] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'evidence' | 'build' | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const videoInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void api.captureHealth().then(setCaptureHealth).catch((reason: unknown) => {
+      setCaptureHealth({ available: false, message: reason instanceof Error ? reason.message : String(reason) });
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -281,6 +295,8 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
   }, [project?.id, project?.suitability.acceptedApproximation]);
 
   const runningRun = project?.runs.find((run) => run.status === 'running' || run.status === 'queued');
+  const latestCapture = project?.captures[0];
+  const processingCapture = project?.captures.find((capture) => capture.status === 'queued' || capture.status === 'processing');
   useEffect(() => {
     if (!runningRun) return;
     const source = new EventSource(`/api/runs/${runningRun.id}/events`);
@@ -296,6 +312,19 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
       window.clearInterval(poll);
     };
   }, [refresh, runningRun?.id]);
+
+  useEffect(() => {
+    if (!processingCapture) return;
+    const poll = window.setInterval(() => void refresh(), 1_000);
+    return () => window.clearInterval(poll);
+  }, [processingCapture?.id, refresh]);
+
+  useEffect(() => {
+    if (latestCapture?.status === 'needs_review' && autoOpenedCaptureId !== latestCapture.id) {
+      setAutoOpenedCaptureId(latestCapture.id);
+      setShowCaptureReview(true);
+    }
+  }, [autoOpenedCaptureId, latestCapture?.id, latestCapture?.status]);
 
   const hero = project?.references.find((reference) => reference.role === 'hero');
   const selectedReference = project?.references.find((reference) => reference.id === selectedReferenceId) ?? hero;
@@ -324,6 +353,32 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
       return;
     }
     setUploadFile(file);
+  };
+
+  const chooseVideo = async (file?: File) => {
+    if (!file) return;
+    if (captureHealth && !captureHealth.available) {
+      setError(captureHealth.message);
+      return;
+    }
+    if (!['video/mp4', 'video/quicktime', 'video/webm'].includes(file.type)) {
+      setError('Choose a MOV, MP4, or WebM video.');
+      return;
+    }
+    if (file.size > 500 * 1024 * 1024) {
+      setError('Object videos must be 500 MB or smaller.');
+      return;
+    }
+    setUploadingVideo(true);
+    setError('');
+    try {
+      await api.uploadVideo(projectId, file, selectedProvider);
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setUploadingVideo(false);
+    }
   };
 
   const uploadReference = async (role: ReferenceRole, crop?: { x: number; y: number; width: number; height: number }) => {
@@ -355,6 +410,7 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
         sourceRunId: project.activeRunId,
         feedback: kind === 'refine' ? feedback.trim() : undefined,
         acceptApproximation,
+        autoFinish: kind === 'draft',
       });
       setFeedback('');
       await refresh();
@@ -417,9 +473,40 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
         <aside className={`evidence-panel ${mobilePanel === 'evidence' ? 'mobile-open' : ''}`}>
           <PanelHeader index="01" title="Evidence" subtitle={`${project.references.length}/8 source views`} onClose={() => setMobilePanel(null)} />
           <div className="evidence-guide">
-            <ScanLine size={18} />
-            <p><strong>Clear silhouette first.</strong> Neutral light beats a perfect background.</p>
+            <Video size={18} />
+            <p><strong>One slow phone video is enough.</strong> Keep the object still, start at the front, circle it once, then tilt slightly above and below.</p>
           </div>
+          <section className={`video-capture-card ${latestCapture?.status ?? ''}`}>
+            <div className="video-capture-title">
+              <span><Video size={16} /><strong>Video capture</strong></span>
+              <small>Recommended</small>
+            </div>
+            {!latestCapture || latestCapture.status === 'failed' || latestCapture.status === 'canceled' ? (
+              <>
+                <p>{latestCapture?.error ?? (captureHealth && !captureHealth.available ? captureHealth.message : 'Upload a 15–30 second orbit. The app will choose clear angles and detect visible text.')}</p>
+                <button className="primary-button wide" disabled={uploadingVideo || Boolean(processingCapture) || captureHealth?.available === false} onClick={() => videoInput.current?.click()}>
+                  {uploadingVideo ? <LoaderCircle className="spin" size={16} /> : <Video size={16} />}
+                  {uploadingVideo ? 'Uploading video…' : latestCapture ? 'Try another video' : 'Upload object video'}
+                </button>
+              </>
+            ) : latestCapture.status === 'queued' || latestCapture.status === 'processing' ? (
+              <div className="capture-processing"><LoaderCircle className="spin" size={17} /><span><strong>Choosing useful views</strong><small>Checking sharpness, angles, and label text locally…</small></span></div>
+            ) : latestCapture.status === 'needs_review' ? (
+              <>
+                <p>{latestCapture.analysis?.summary ?? 'Your capture pack is ready for one quick review.'}</p>
+                <button className="primary-button wide" onClick={() => setShowCaptureReview(true)}><CheckCircle2 size={16} /> Review selected views</button>
+              </>
+            ) : (
+              <div className="capture-ready"><CheckCircle2 size={16} /><span><strong>Capture pack ready</strong><small>{latestCapture.frames.filter((frame) => frame.selected).length} views · {project.surfaceTexts.length} confirmed text phrase{project.surfaceTexts.length === 1 ? '' : 's'}</small></span></div>
+            )}
+          </section>
+          <input
+            ref={videoInput}
+            className="visually-hidden"
+            type="file"
+            accept="video/mp4,video/quicktime,video/webm,.mov"
+            onChange={(event) => { void chooseVideo(event.target.files?.[0]); event.target.value = ''; }}
+          />
           <div className="reference-list">
             {project.references.map((reference) => (
               <button
@@ -442,10 +529,13 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
             ))}
           </div>
           {project.references.length < 8 && (
-            <button className="add-reference" onClick={() => fileInput.current?.click()}>
-              <ImagePlus size={20} />
-              <span><strong>Add another view</strong><small>PNG, JPEG or WebP · max 20 MB</small></span>
-            </button>
+            <details className="photo-capture-advanced">
+              <summary>Advanced: add individual photos</summary>
+              <button className="add-reference" onClick={() => fileInput.current?.click()}>
+                <ImagePlus size={20} />
+                <span><strong>Add another view</strong><small>PNG, JPEG or WebP · max 20 MB</small></span>
+              </button>
+            </details>
           )}
           <input
             ref={fileInput}
@@ -526,24 +616,27 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
             <section className="build-gate">
               <div className="gate-number">01</div>
               <ImagePlus size={28} />
-              <strong>Add a hero view</strong>
-              <p>One strong three-quarter photograph unlocks the first draft.</p>
-              <button className="primary-button wide" onClick={() => fileInput.current?.click()}>Choose image</button>
+              <strong>Capture the object once</strong>
+              <p>Use a short phone video. We’ll choose the angles and prepare the label automatically.</p>
+              <button className="primary-button wide" disabled={captureHealth?.available === false} onClick={() => videoInput.current?.click()}><Video size={17} /> Upload object video</button>
+              {captureHealth?.available === false && <span className="inline-error">{captureHealth.message}</span>}
+              <button className="text-button" onClick={() => fileInput.current?.click()}>Or add photos manually</button>
             </section>
           ) : !activeRun ? (
             <section className="build-gate ready-gate">
               <div className="gate-number">02</div>
               <Layers3 size={28} />
-              <strong>Shape before surface</strong>
-              <p>Draft builds silhouette, structure, and primary form. Materials wait until you approve it.</p>
+              <strong>Create the full 3D model</strong>
+              <p>We first verify the shape, then automatically add materials, confirmed label text, transparency, and lighting.</p>
               <button
                 className="primary-button wide"
-                disabled={Boolean(runningRun) || startingRun || !providerReady(selectedProvider) || !acceptApproximation}
+                disabled={Boolean(runningRun) || startingRun || !providerReady(selectedProvider) || (project.suitability.verdict !== 'pass' && !acceptApproximation)}
                 onClick={() => void startRun('draft')}
               >
                 {startingRun || runningRun ? <LoaderCircle className="spin" size={18} /> : <Hammer size={18} />}
-                {runningRun ? `Building ${runningRun.phase}…` : 'Generate structural draft'}
+                {runningRun ? `Building ${runningRun.phase}…` : 'Create 3D model'}
               </button>
+              <small className="guided-build-note">Draft checks shape. Finish adds the label and realistic surface.</small>
             </section>
           ) : (
             <>
@@ -597,6 +690,18 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
           initialRole={hero ? 'left' : 'hero'}
           onClose={() => setUploadFile(undefined)}
           onSubmit={uploadReference}
+        />
+      )}
+      {showCaptureReview && latestCapture?.status === 'needs_review' && (
+        <VideoCaptureReview
+          projectId={project.id}
+          capture={latestCapture as VideoCapture}
+          onClose={() => setShowCaptureReview(false)}
+          onAccept={async (input) => {
+            await api.acceptCapture(project.id, latestCapture.id, input);
+            setShowCaptureReview(false);
+            await refresh();
+          }}
         />
       )}
     </main>

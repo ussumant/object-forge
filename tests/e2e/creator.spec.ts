@@ -1,9 +1,13 @@
+import { execFile } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { promisify } from 'node:util';
 import sharp from 'sharp';
 import { expect, test } from '@playwright/test';
 
 const fixturePath = resolve('output/playwright/reference-fixture.png');
+const videoFixturePath = resolve('output/playwright/orbit-fixture.mp4');
+const execFileAsync = promisify(execFile);
 
 test.beforeAll(async () => {
   await mkdir(resolve('output/playwright'), { recursive: true });
@@ -13,6 +17,30 @@ test.beforeAll(async () => {
     ])
     .png()
     .toFile(fixturePath);
+  await execFileAsync('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi',
+    '-i', 'testsrc2=size=640x480:rate=12', '-t', '5', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+    videoFixturePath,
+  ]);
+});
+
+test('video capture selects views, confirms text, and completes a guided build', async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  const name = `Guided bottle ${Date.now()}`;
+  await page.goto('/');
+  await page.getByLabel('What are we rebuilding?').fill(name);
+  await page.getByRole('button', { name: 'Create object project' }).click();
+  await page.locator('input[accept^="video/"]').setInputFiles(videoFixturePath);
+  await expect(page.getByRole('heading', { name: 'These are the views we’ll use' })).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Add text', exact: true }).click();
+  await page.getByPlaceholder('e.g. POCARI SWEAT').fill('POCARI SWEAT');
+  await page.getByRole('button', { name: /Use \d+ selected views/i }).click();
+  await expect(page.getByText('Capture pack ready')).toBeVisible();
+  await page.getByRole('button', { name: 'Create 3D model' }).click();
+  await expect(page.getByText(/finish · Codex/i)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/active model ready/i)).toBeVisible({ timeout: 20_000 });
+  expect(consoleErrors).toEqual([]);
 });
 
 test('capture, draft, finish, refine, reload, and export', async ({ page }) => {
@@ -24,16 +52,13 @@ test('capture, draft, finish, refine, reload, and export', async ({ page }) => {
   await page.getByRole('button', { name: 'Create object project' }).click();
   await expect(page.getByText(name, { exact: true })).toBeVisible();
 
-  const chooser = page.locator('input[type=file]');
+  const chooser = page.locator('input[accept*="image/png"]');
   await chooser.setInputFiles(fixturePath);
   await expect(page.getByRole('heading', { name: 'Isolate the object' })).toBeVisible();
   await page.getByRole('button', { name: 'Add to capture pack' }).click();
   await expect(page.getByText('conditional capture')).toBeVisible();
   await page.getByText('I accept inferred geometry for unseen sides or the underside.').click();
-  await page.getByRole('button', { name: 'Generate structural draft' }).click();
-  await expect(page.getByText(/draft · Codex/i)).toBeVisible({ timeout: 15_000 });
-
-  await page.getByRole('button', { name: 'Finish materials + light' }).click();
+  await page.getByRole('button', { name: 'Create 3D model' }).click();
   await expect(page.getByText(/finish · Codex/i)).toBeVisible({ timeout: 15_000 });
   await page.getByLabel(/Directed refinement/).fill('Make the shutter button larger.');
   await page.getByRole('button', { name: 'Create refinement run' }).click();

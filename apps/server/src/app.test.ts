@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
@@ -101,33 +101,28 @@ describe('local creator API', () => {
     expect(accepted.json().project.captures[0].status).toBe('ready');
     const draft = await app.inject({
       method: 'POST', url: `/api/projects/${projectId}/runs`,
-      payload: { provider: 'codex', kind: 'draft', acceptApproximation: true },
+      payload: { provider: 'codex', kind: 'draft', acceptApproximation: true, autoFinish: true },
     });
     const draftId = draft.json().run.id as string;
-    let activeDraft = false;
+    let finishId = '';
     for (let attempt = 0; attempt < 100; attempt += 1) {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 30));
       const state = await app.inject({ method: 'GET', url: `/api/projects/${projectId}` });
-      activeDraft = state.json().project.activeRunId === draftId;
-      if (activeDraft) break;
+      const finishRun = state.json().project.runs.find((run: { kind: string; sourceRunId?: string; status: string }) => run.kind === 'finish' && run.sourceRunId === draftId && run.status === 'succeeded');
+      if (finishRun && state.json().project.activeRunId === finishRun.id) {
+        finishId = finishRun.id;
+        break;
+      }
     }
-    expect(activeDraft).toBe(true);
-    const finish = await app.inject({
-      method: 'POST', url: `/api/projects/${projectId}/runs`,
-      payload: { provider: 'codex', kind: 'finish', sourceRunId: draftId },
-    });
-    const finishId = finish.json().run.id as string;
-    let finished = false;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 30));
-      const state = await app.inject({ method: 'GET', url: `/api/projects/${projectId}` });
-      finished = state.json().project.activeRunId === finishId;
-      if (finished) break;
-    }
-    expect(finished).toBe(true);
+    expect(finishId).not.toBe('');
     const model = await app.inject({ method: 'GET', url: `/api/projects/${projectId}/runs/${finishId}/model.js` });
     expect(model.body).toContain('POCARI SWEAT');
     expect(model.body).toContain('confirmed-label-decal');
+    const archive = await app.inject({ method: 'GET', url: `/api/projects/${projectId}/export` });
+    expect(archive.statusCode).toBe(200);
+    const exportedEvidence = JSON.parse(await readFile(resolve(store.runDir(projectId, finishId), 'export/label-evidence.json'), 'utf8'));
+    expect(exportedEvidence.renderings[0]).toMatchObject({ text: 'POCARI SWEAT', nodeName: 'confirmed-label-decal' });
+    expect(await readFile(resolve(store.runDir(projectId, finishId), 'export/assets/labels/label-text-one.png'))).toBeTruthy();
     await app.close();
   });
 

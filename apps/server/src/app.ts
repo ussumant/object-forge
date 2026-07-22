@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import cors from '@fastify/cors';
@@ -160,9 +160,14 @@ export async function createApp(options: { store?: ProjectStore; captureProcesso
     const captureDir = store.captureDir(request.params.id, captureId);
     await mkdir(captureDir, { recursive: true });
     let bytes = 0;
-    upload.file.on('data', (chunk: Buffer) => { bytes += chunk.byteLength; });
-    await pipeline(upload.file, createWriteStream(resolve(captureDir, storedFilename), { flags: 'wx' }));
-    if (upload.file.truncated || bytes > MAX_VIDEO_BYTES) throw new Error('Object videos must be 500 MB or smaller.');
+    try {
+      upload.file.on('data', (chunk: Buffer) => { bytes += chunk.byteLength; });
+      await pipeline(upload.file, createWriteStream(resolve(captureDir, storedFilename), { flags: 'wx' }));
+      if (upload.file.truncated || bytes > MAX_VIDEO_BYTES) throw new Error('Object videos must be 500 MB or smaller.');
+    } catch (error) {
+      await rm(captureDir, { recursive: true, force: true });
+      throw error;
+    }
     const createdAt = new Date().toISOString();
     const capture: VideoCapture = {
       id: captureId,

@@ -90,7 +90,8 @@ async function validateConfirmedLabels(workDir: string, project: CreatorProject,
     renderings?: Array<{ evidenceId?: string; text?: string; nodeName?: string; method?: string }>;
   };
   for (const text of project.surfaceTexts) {
-    if (!source.includes(text.value)) throw new Error(`Finished model omitted confirmed text: ${text.value}`);
+    const escapedText = JSON.stringify(text.value).slice(1, -1);
+    if (!source.includes(text.value) && !source.includes(escapedText)) throw new Error(`Finished model omitted confirmed text: ${text.value}`);
     const rendering = evidence.renderings?.find((item) => item.evidenceId === text.id);
     if (!rendering?.nodeName || rendering.text !== text.value || !rendering.method) {
       throw new Error(`Finished model did not verify label placement for: ${text.value}`);
@@ -285,6 +286,23 @@ export class RunManager {
         at: now(),
       });
       this.events.publish({ type: 'completed', runId, at: now() });
+      if (runSnapshot.kind === 'draft' && runSnapshot.autoFinish && !this.canceled.has(runId)) {
+        await this.store.appendRunMessage(projectId, runId, 'Shape checks passed. Continuing automatically with materials, confirmed text, and lighting.');
+        try {
+          await this.start(projectId, {
+            provider: runSnapshot.provider,
+            kind: 'finish',
+            sourceRunId: runId,
+            acceptApproximation,
+          });
+        } catch (error) {
+          await this.store.appendRunMessage(
+            projectId,
+            runId,
+            `Automatic finishing could not start. The successful shape draft remains active: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
     } catch (error) {
       if (this.canceled.has(runId)) return;
       const message = error instanceof Error ? error.message : String(error);

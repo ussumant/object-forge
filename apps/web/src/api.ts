@@ -4,6 +4,7 @@ import type {
   ProviderHealth,
   ReferenceRole,
   StartRunInput,
+  VideoCapture,
 } from '@img3d/shared';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -24,6 +25,22 @@ export const api = {
     body: JSON.stringify({ name }),
   }),
   providerHealth: () => request<{ providers: ProviderHealth[] }>('/api/system/providers'),
+  captureHealth: () => request<{ available: boolean; message: string }>('/api/system/capture'),
+  uploadVideo: (projectId: string, file: File, provider: ProviderHealth['provider']) => {
+    const data = new FormData();
+    data.append('provider', provider);
+    data.append('file', file);
+    return request<{ capture: VideoCapture }>(`/api/projects/${projectId}/captures/video`, { method: 'POST', body: data });
+  },
+  getCapture: (projectId: string, captureId: string) => request<{ capture: VideoCapture }>(`/api/projects/${projectId}/captures/${captureId}`),
+  acceptCapture: (
+    projectId: string,
+    captureId: string,
+    input: { frameIds: string[]; texts: Array<{ id?: string; value: string; frameId: string; bounds?: { x: number; y: number; width: number; height: number }; exportAllowed: boolean }> },
+  ) => request<{ project: CreatorProject }>(`/api/projects/${projectId}/captures/${captureId}/accept`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  }),
+  deleteCapture: (projectId: string, captureId: string) => request<{ project: CreatorProject }>(`/api/projects/${projectId}/captures/${captureId}`, { method: 'DELETE' }),
   uploadReference: (projectId: string, file: File, role: ReferenceRole, crop?: { x: number; y: number; width: number; height: number }) => {
     const data = new FormData();
     data.append('role', role);
@@ -58,4 +75,8 @@ export function modelUrl(projectId: string, runId: string): string {
 
 export function artifactUrl(projectId: string, runId: string, index: number): string {
   return `/api/projects/${projectId}/runs/${runId}/artifacts/${index}`;
+}
+
+export function captureFrameUrl(projectId: string, captureId: string, frameId: string): string {
+  return `/api/projects/${projectId}/captures/${captureId}/frames/${frameId}`;
 }

@@ -7,7 +7,8 @@ The application vendors [`hoainho/img2threejs`](https://github.com/hoainho/img2t
 ## What v1 includes
 
 - Project library and recoverable run history stored locally under `data/projects/`.
-- Guided PNG, JPEG, and WebP intake with roles, cropping, image validation, and hidden-geometry acknowledgement.
+- Recommended MOV, MP4, and WebM intake that extracts and ranks useful views locally, plus advanced PNG, JPEG, and WebP intake.
+- Confirmed surface-text evidence and local hybrid decals so packaging words are not silently omitted during finishing.
 - Codex and Claude CLI adapters with startup health checks, resumable same-provider sessions, cancellation, event streaming, and a ten-minute inactivity detector.
 - Draft, finish, and prompted refinement runs in isolated workspaces.
 - Orbitable React Three Fiber preview with reference comparison, wireframe, lighting, background, and camera reset controls.
@@ -19,6 +20,7 @@ The application vendors [`hoainho/img2threejs`](https://github.com/hoainho/img2t
 - macOS
 - Node.js 24 or newer and npm
 - Python 3.10 or newer for the vendored reconstruction utilities
+- FFmpeg and ffprobe (`brew install ffmpeg`) for video capture packs
 - An authenticated `codex` CLI, `claude` CLI, or both
 - Google Chrome for Playwright end-to-end tests
 
@@ -50,12 +52,13 @@ Then open [http://127.0.0.1:4057](http://127.0.0.1:4057).
 
 ## Creator workflow
 
-1. Create a project.
-2. Add one required hero photo and up to seven supporting views.
-3. Crop the object and review the suitability result. A one-view reconstruction requires explicit acknowledgement that hidden geometry will be inferred.
-4. Generate a draft, orbit and compare it, then submit plain-language refinements.
-5. Finish materials and presentation details.
-6. Export the active successful run as a standalone ZIP.
+1. Create a project and upload a 15–30 second phone video of the stationary object.
+2. Begin at the front, make one slow orbit, then briefly show higher and lower angles.
+3. Review the automatically selected frames and confirm any detected label, logo, or engraving text.
+4. Choose **Create 3D model**. The app validates geometry, then continues automatically through materials, confirmed text, and lighting.
+5. Orbit and compare the finished model, submit plain-language refinements when useful, and export the active run as a standalone ZIP.
+
+Individual photos remain available under the advanced capture control. A one-view reconstruction still requires explicit acknowledgement that hidden geometry will be inferred.
 
 Use evenly lit, sharp images with the whole silhouette visible. Front, back, side, and top views improve geometry; detail views are best for materials and small features. Glass-dominant objects, people, animals, scenes, and manufacturing-grade reconstruction are outside the v1 promise.
 
@@ -87,6 +90,6 @@ Generated model roots expose `root.userData.sculptRuntime`, and meaningful parts
 
 ## Local data
 
-Projects, references, run logs, workspaces, generated artifacts, provider session identifiers, and activation state live in the gitignored `data/projects/` tree. Source photographs are not included in exports unless a generated model explicitly depends on a local projected texture.
+Projects, source videos, extracted frames, references, confirmed text, run logs, workspaces, generated artifacts, provider session identifiers, and activation state live in the gitignored `data/projects/` tree. Source videos and full photographs are never exported. A confirmed local label crop is included only when the generated model explicitly uses it.
 
 The app is intentionally local-only in v1: there are no accounts, billing, collaboration, public hosting, GLB export, or cloud persistence.
