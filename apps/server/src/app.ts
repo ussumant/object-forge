@@ -1,6 +1,7 @@
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
@@ -12,10 +13,14 @@ import {
   isProvider,
   isReferenceRole,
   isRunKind,
+  type NormalizedRect,
   type CropRect,
   type ReferenceImage,
+  type SurfaceTextEvidence,
   type StartRunInput,
+  type VideoCapture,
 } from '@img3d/shared';
+import { CaptureManager, captureFrameStream, captureToolHealth, type CaptureProcessor } from './capture.js';
 import { RunEventBus } from './events.js';
 import { buildProjectExport } from './exporter.js';
 import { WEB_DIST_DIR } from './paths.js';
@@ -24,6 +29,8 @@ import { RunManager } from './runner.js';
 import { ProjectStore } from './store.js';
 
 const uploadMimeTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const videoMimeTypes = new Set(['video/mp4', 'video/quicktime', 'video/webm']);
+const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 const cropSchema = z.object({
   x: z.number().int().min(0),
   y: z.number().int().min(0),
@@ -46,19 +53,22 @@ function parseCrop(raw: string | undefined): CropRect | undefined {
   return cropSchema.parse(JSON.parse(raw));
 }
 
-export async function createApp(options: { store?: ProjectStore } = {}): Promise<FastifyInstance> {
+export async function createApp(options: { store?: ProjectStore; captureProcessor?: CaptureProcessor } = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' });
   const store = options.store ?? new ProjectStore();
   await store.init();
   const eventBus = new RunEventBus();
   const runs = new RunManager(store, eventBus);
+  const captures = options.captureProcessor ?? new CaptureManager(store);
 
   await app.register(cors, { origin: true });
   await app.register(multipart, {
-    limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 8, parts: 10 },
+    limits: { fileSize: MAX_VIDEO_BYTES, files: 1, fields: 16, parts: 18 },
   });
 
   app.get('/api/health', async () => ({ ok: true, fakeProvider: process.env.IMG3D_FAKE_PROVIDER === '1' }));
+
+  app.get('/api/system/capture', async () => captureToolHealth());
 
   app.get('/api/system/providers', async () => {
     const [codex, claude] = await Promise.all([providerHealth('codex'), providerHealth('claude')]);
@@ -89,6 +99,7 @@ export async function createApp(options: { store?: ProjectStore } = {}): Promise
     }
     if (!uploadMimeTypes.has(upload.mimetype)) throw new Error('Only PNG, JPEG, and WebP images are supported.');
     const buffer = await upload.toBuffer();
+    if (buffer.byteLength > 20 * 1024 * 1024) throw new Error('Reference images must be 20 MB or smaller.');
     const image = sharp(buffer, { failOn: 'error' });
     const metadata = await image.metadata();
     const width = metadata.width ?? 0;
@@ -134,6 +145,151 @@ export async function createApp(options: { store?: ProjectStore } = {}): Promise
     };
     const updated = await store.addReference(project.id, reference);
     return reply.code(201).send({ project: updated, reference });
+  });
+
+  app.post<{ Params: { id: string } }>('/api/projects/:id/captures/video', async (request, reply) => {
+    await store.getProject(request.params.id);
+    const upload = await request.file();
+    if (!upload) throw new Error('Attach one MOV, MP4, or WebM video.');
+    if (!videoMimeTypes.has(upload.mimetype)) throw new Error('Only MOV, MP4, and WebM videos are supported.');
+    const providerValue = fieldValue(upload.fields as Record<string, unknown>, 'provider') ?? 'codex';
+    if (!isProvider(providerValue)) throw new Error('Choose a valid capture-analysis provider.');
+    const captureId = nanoid(12);
+    const extension = upload.mimetype === 'video/quicktime' ? '.mov' : upload.mimetype === 'video/webm' ? '.webm' : '.mp4';
+    const storedFilename = `source${extension}`;
+    const captureDir = store.captureDir(request.params.id, captureId);
+    await mkdir(captureDir, { recursive: true });
+    let bytes = 0;
+    upload.file.on('data', (chunk: Buffer) => { bytes += chunk.byteLength; });
+    await pipeline(upload.file, createWriteStream(resolve(captureDir, storedFilename), { flags: 'wx' }));
+    if (upload.file.truncated || bytes > MAX_VIDEO_BYTES) throw new Error('Object videos must be 500 MB or smaller.');
+    const createdAt = new Date().toISOString();
+    const capture: VideoCapture = {
+      id: captureId,
+      provider: providerValue,
+      status: 'queued',
+      originalFilename: upload.filename,
+      storedFilename,
+      mimeType: upload.mimetype as VideoCapture['mimeType'],
+      bytes,
+      frames: [],
+      createdAt,
+      updatedAt: createdAt,
+    };
+    await store.addCapture(request.params.id, capture);
+    void captures.process(request.params.id, captureId);
+    return reply.code(202).send({ capture });
+  });
+
+  app.get<{ Params: { id: string; captureId: string } }>('/api/projects/:id/captures/:captureId', async (request, reply) => {
+    const project = await store.getProject(request.params.id);
+    const capture = project.captures.find((item) => item.id === request.params.captureId);
+    if (!capture) return reply.code(404).send({ error: 'Video capture not found.' });
+    return { capture };
+  });
+
+  app.get<{ Params: { id: string; captureId: string; frameId: string } }>(
+    '/api/projects/:id/captures/:captureId/frames/:frameId',
+    async (request, reply) => {
+      const project = await store.getProject(request.params.id);
+      const capture = project.captures.find((item) => item.id === request.params.captureId);
+      if (!capture) return reply.code(404).send({ error: 'Video capture not found.' });
+      try {
+        return reply.type('image/jpeg').send(captureFrameStream(store, project.id, capture, request.params.frameId));
+      } catch {
+        return reply.code(404).send({ error: 'Capture frame not found.' });
+      }
+    },
+  );
+
+  const acceptedTextSchema = z.object({
+    id: z.string().optional(),
+    value: z.string().trim().min(1).max(200),
+    frameId: z.string().min(1),
+    bounds: z.object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+      width: z.number().positive().max(1),
+      height: z.number().positive().max(1),
+    }).optional(),
+    exportAllowed: z.boolean().default(true),
+  });
+
+  app.post<{
+    Params: { id: string; captureId: string };
+    Body: { frameIds?: string[]; texts?: Array<z.input<typeof acceptedTextSchema>> };
+  }>('/api/projects/:id/captures/:captureId/accept', async (request, reply) => {
+    const project = await store.getProject(request.params.id);
+    const capture = project.captures.find((item) => item.id === request.params.captureId);
+    if (!capture) return reply.code(404).send({ error: 'Video capture not found.' });
+    if (capture.status !== 'needs_review') throw new Error('This video is not ready for review.');
+    const requestedIds = z.array(z.string()).min(1).max(8).parse(request.body?.frameIds ?? capture.frames.filter((item) => item.selected).map((item) => item.id));
+    const selected = requestedIds.map((id) => capture.frames.find((item) => item.id === id));
+    if (selected.some((item) => !item)) throw new Error('One or more selected video frames no longer exist.');
+    const frames = selected.filter((item): item is NonNullable<typeof item> => Boolean(item));
+    if (!frames.some((item) => item.assignedRole === 'hero')) frames[0]!.assignedRole = 'hero';
+    const references: ReferenceImage[] = [];
+    await mkdir(store.referencesDir(project.id), { recursive: true });
+    for (const frame of frames) {
+      const id = nanoid(12);
+      const storedFilename = `${id}.jpg`;
+      const source = resolve(store.captureDir(project.id, capture.id), 'frames', frame.filename);
+      const target = resolve(store.referencesDir(project.id), storedFilename);
+      await sharp(source).jpeg({ quality: 94 }).toFile(target);
+      references.push({
+        id,
+        role: frame.assignedRole ?? 'detail',
+        originalFilename: `${capture.originalFilename} @ ${(frame.timestampMs / 1_000).toFixed(1)}s`,
+        storedFilename,
+        mimeType: 'image/jpeg',
+        bytes: (await readFile(target)).byteLength,
+        width: frame.width,
+        height: frame.height,
+        warnings: [],
+        captureProvenance: { captureId: capture.id, frameId: frame.id, timestampMs: frame.timestampMs },
+        createdAt: new Date().toISOString(),
+      });
+    }
+    const textInputs = z.array(acceptedTextSchema).max(20).parse(request.body?.texts ?? []);
+    const labelDir = resolve(store.captureDir(project.id, capture.id), 'labels');
+    await mkdir(labelDir, { recursive: true });
+    const surfaceTexts: SurfaceTextEvidence[] = [];
+    for (const input of textInputs) {
+      const frame = capture.frames.find((item) => item.id === input.frameId);
+      if (!frame) throw new Error('Confirmed label text references an unknown video frame.');
+      const id = input.id ?? nanoid(10);
+      let assetFilename: string | undefined;
+      if (input.exportAllowed && input.bounds) {
+        const bounds = input.bounds as NormalizedRect;
+        const left = Math.max(0, Math.floor(bounds.x * frame.width));
+        const top = Math.max(0, Math.floor(bounds.y * frame.height));
+        const width = Math.min(frame.width - left, Math.max(1, Math.floor(bounds.width * frame.width)));
+        const height = Math.min(frame.height - top, Math.max(1, Math.floor(bounds.height * frame.height)));
+        assetFilename = `label-${id}.png`;
+        await sharp(resolve(store.captureDir(project.id, capture.id), 'frames', frame.filename))
+          .extract({ left, top, width, height }).normalize().png().toFile(resolve(labelDir, assetFilename));
+      }
+      surfaceTexts.push({
+        id,
+        value: input.value,
+        frameId: input.frameId,
+        captureId: capture.id,
+        bounds: input.bounds,
+        renderingMethod: assetFilename ? 'hybrid-decal' : 'generated-text',
+        exportAllowed: input.exportAllowed,
+        assetFilename,
+      });
+    }
+    const updated = await store.acceptCapture(project.id, capture.id, references, surfaceTexts);
+    return reply.code(201).send({ project: updated });
+  });
+
+  app.delete<{ Params: { id: string; captureId: string } }>('/api/projects/:id/captures/:captureId', async (request) => {
+    const project = await store.getProject(request.params.id);
+    const capture = project.captures.find((item) => item.id === request.params.captureId);
+    if (!capture) throw new Error('Video capture not found.');
+    if (capture.status === 'processing' || capture.status === 'queued') await captures.cancel(project.id, capture.id);
+    return { project: await store.removeCapture(project.id, capture.id) };
   });
 
   app.delete<{ Params: { id: string; referenceId: string } }>('/api/projects/:id/references/:referenceId', async (request) => ({

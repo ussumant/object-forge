@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { nanoid } from 'nanoid';
 import type {
@@ -9,6 +9,8 @@ import type {
   RunKind,
   RunPhase,
   RunStatus,
+  SurfaceTextEvidence,
+  VideoCapture,
 } from '@img3d/shared';
 import { PROJECTS_DIR } from './paths.js';
 
@@ -45,11 +47,20 @@ export class ProjectStore {
     const projects = await this.listProjects();
     await Promise.all(projects.map(async (project) => {
       let changed = false;
+      await mkdir(this.capturesDir(project.id), { recursive: true });
       for (const run of project.runs) {
         if (run.status === 'queued' || run.status === 'running') {
           run.status = 'failed';
           run.error = 'The local service restarted while this run was active. Start a new run to continue.';
           run.updatedAt = new Date().toISOString();
+          changed = true;
+        }
+      }
+      for (const capture of project.captures) {
+        if (capture.status === 'queued' || capture.status === 'processing') {
+          capture.status = 'failed';
+          capture.error = 'The local service restarted while this video was processing. Retry the upload.';
+          capture.updatedAt = new Date().toISOString();
           changed = true;
         }
       }
@@ -64,6 +75,15 @@ export class ProjectStore {
 
   referencesDir(projectId: string): string {
     return resolve(this.projectDir(projectId), 'references');
+  }
+
+  capturesDir(projectId: string): string {
+    return resolve(this.projectDir(projectId), 'captures');
+  }
+
+  captureDir(projectId: string, captureId: string): string {
+    assertSafeId(captureId, 'capture id');
+    return resolve(this.capturesDir(projectId), captureId);
   }
 
   runDir(projectId: string, runId: string): string {
@@ -82,6 +102,8 @@ export class ProjectStore {
       name: name.trim().slice(0, 100) || 'Untitled object',
       slug: slugify(name),
       references: [],
+      captures: [],
+      surfaceTexts: [],
       suitability: {
         verdict: 'pending',
         summary: 'Add a hero image to begin the suitability check.',
@@ -94,6 +116,7 @@ export class ProjectStore {
       updatedAt: now,
     };
     await mkdir(this.referencesDir(project.id), { recursive: true });
+    await mkdir(this.capturesDir(project.id), { recursive: true });
     await mkdir(resolve(this.projectDir(project.id), 'runs'), { recursive: true });
     await this.saveProject(project);
     return project;
@@ -116,7 +139,76 @@ export class ProjectStore {
 
   async getProject(projectId: string): Promise<CreatorProject> {
     const raw = await readFile(this.manifestPath(projectId), 'utf8');
-    return JSON.parse(raw) as CreatorProject;
+    const project = JSON.parse(raw) as CreatorProject;
+    project.captures ??= [];
+    project.surfaceTexts ??= [];
+    return project;
+  }
+
+  async addCapture(projectId: string, capture: VideoCapture): Promise<CreatorProject> {
+    const project = await this.getProject(projectId);
+    project.captures.unshift(capture);
+    await mkdir(this.captureDir(projectId, capture.id), { recursive: true });
+    await this.saveProject(project);
+    return project;
+  }
+
+  async updateCapture(projectId: string, captureId: string, patch: Partial<VideoCapture>): Promise<VideoCapture> {
+    const project = await this.getProject(projectId);
+    const capture = project.captures.find((item) => item.id === captureId);
+    if (!capture) throw new Error('Video capture not found.');
+    Object.assign(capture, patch, { updatedAt: new Date().toISOString() });
+    await this.saveProject(project);
+    return capture;
+  }
+
+  async acceptCapture(
+    projectId: string,
+    captureId: string,
+    references: ReferenceImage[],
+    surfaceTexts: SurfaceTextEvidence[],
+  ): Promise<CreatorProject> {
+    const project = await this.getProject(projectId);
+    const capture = project.captures.find((item) => item.id === captureId);
+    if (!capture) throw new Error('Video capture not found.');
+    if (project.references.length + references.length > 8) throw new Error('A project can contain at most eight reference images.');
+    if (project.references.some((item) => item.role === 'hero') && references.some((item) => item.role === 'hero')) {
+      throw new Error('Remove the existing hero image before accepting this video capture.');
+    }
+    project.references.push(...references);
+    project.surfaceTexts = surfaceTexts;
+    capture.status = 'ready';
+    capture.frames = capture.frames.map((frame) => ({
+      ...frame,
+      selected: references.some((reference) => reference.captureProvenance?.frameId === frame.id),
+    }));
+    capture.updatedAt = new Date().toISOString();
+    const hasHero = project.references.some((item) => item.role === 'hero');
+    const hasExtraView = project.references.some((item) => item.role !== 'hero' && item.role !== 'detail');
+    project.suitability = {
+      verdict: hasHero ? (hasExtraView ? 'pass' : 'conditional') : 'pending',
+      summary: hasHero && hasExtraView
+        ? 'The video supplied a hero image and supporting geometry evidence.'
+        : hasHero
+          ? 'The video supplied a hero image, but hidden geometry may still be inferred.'
+          : 'A hero image is required before generation.',
+      warnings: [...(capture.analysis?.warnings ?? []), ...references.flatMap((item) => item.warnings)],
+      requestedViews: capture.analysis?.requestedViews ?? [],
+      acceptedApproximation: project.suitability.acceptedApproximation,
+    };
+    await this.saveProject(project);
+    return project;
+  }
+
+  async removeCapture(projectId: string, captureId: string): Promise<CreatorProject> {
+    const project = await this.getProject(projectId);
+    const capture = project.captures.find((item) => item.id === captureId);
+    if (!capture) throw new Error('Video capture not found.');
+    if (capture.status === 'ready') throw new Error('Accepted captures remain attached to the project.');
+    project.captures = project.captures.filter((item) => item.id !== captureId);
+    await rm(this.captureDir(projectId, captureId), { recursive: true, force: true });
+    await this.saveProject(project);
+    return project;
   }
 
   async saveProject(project: CreatorProject): Promise<void> {
@@ -182,6 +274,7 @@ export class ProjectStore {
     sourceRunId?: string,
     feedback?: string,
     acceptApproximation = false,
+    autoFinish = false,
   ): Promise<GenerationRun> {
     const project = await this.getProject(projectId);
     const now = new Date().toISOString();
@@ -196,6 +289,7 @@ export class ProjectStore {
       sourceRunId,
       feedback,
       acceptApproximation,
+      autoFinish,
       artifacts: [],
       messages: [],
       createdAt: now,

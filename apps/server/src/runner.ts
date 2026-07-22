@@ -126,6 +126,7 @@ export class RunManager {
       sourceRunId,
       input.feedback,
       acceptApproximation,
+      Boolean(input.autoFinish),
     );
     if (sourceRun?.provider === input.provider && sourceRun.providerSessionId) {
       await this.store.updateRun(projectId, run.id, { providerSessionId: sourceRun.providerSessionId });

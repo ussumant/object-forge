@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
@@ -18,18 +18,90 @@ afterEach(async () => {
   await rm(temporaryDirectory, { recursive: true, force: true });
 });
 
-function multipart(boundary: string, fields: Record<string, string>, file: Buffer): Buffer {
+function multipart(
+  boundary: string,
+  fields: Record<string, string>,
+  file: Buffer,
+  filename = 'fixture.png',
+  mimeType = 'image/png',
+): Buffer {
   const chunks: Buffer[] = [];
   for (const [key, value] of Object.entries(fields)) {
     chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`));
   }
-  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="fixture.png"\r\nContent-Type: image/png\r\n\r\n`));
+  chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`));
   chunks.push(file);
   chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`));
   return Buffer.concat(chunks);
 }
 
 describe('local creator API', () => {
+  it('stores an analyzed video capture and accepts its selected frame and label', async () => {
+    const store = new ProjectStore(resolve(temporaryDirectory, 'video-projects'));
+    const captureProcessor = {
+      process: async (projectId: string, captureId: string) => {
+        const framesDir = resolve(store.captureDir(projectId, captureId), 'frames');
+        await mkdir(framesDir, { recursive: true });
+        await sharp({ create: { width: 800, height: 600, channels: 3, background: '#1674ba' } })
+          .jpeg().toFile(resolve(framesDir, 'frame-0001.jpg'));
+        await store.updateCapture(projectId, captureId, {
+          status: 'needs_review',
+          durationMs: 10_000,
+          width: 800,
+          height: 600,
+          frames: [{
+            id: 'frame-one', filename: 'frame-0001.jpg', timestampMs: 500,
+            width: 800, height: 600, sharpness: 0.8, exposure: 0.8, diversity: 1,
+            selected: true, assignedRole: 'hero', confidence: 0.95,
+          }],
+          analysis: {
+            summary: 'One clear front label frame.', warnings: [], requestedViews: ['back'],
+            detectedTexts: [{
+              id: 'text-one', value: 'POCARI SWEAT', frameId: 'frame-one', confidence: 0.98,
+              bounds: { x: 0.2, y: 0.3, width: 0.6, height: 0.25 },
+            }],
+          },
+        });
+      },
+      cancel: async (projectId: string, captureId: string) => {
+        await store.updateCapture(projectId, captureId, { status: 'canceled' });
+      },
+    };
+    const app = await createApp({ store, captureProcessor });
+    const created = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Bottle' } });
+    const projectId = created.json().project.id as string;
+    const boundary = 'img3d-video-boundary';
+    const uploaded = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/captures/video`,
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: multipart(boundary, { provider: 'codex' }, Buffer.from('fake video'), 'bottle.mov', 'video/quicktime'),
+    });
+    expect(uploaded.statusCode).toBe(202);
+    const captureId = uploaded.json().capture.id as string;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const state = await app.inject({ method: 'GET', url: `/api/projects/${projectId}/captures/${captureId}` });
+      if (state.json().capture.status === 'needs_review') break;
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
+    }
+    const accepted = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/captures/${captureId}/accept`,
+      payload: {
+        frameIds: ['frame-one'],
+        texts: [{
+          id: 'text-one', value: 'POCARI SWEAT', frameId: 'frame-one', exportAllowed: true,
+          bounds: { x: 0.2, y: 0.3, width: 0.6, height: 0.25 },
+        }],
+      },
+    });
+    expect(accepted.statusCode).toBe(201);
+    expect(accepted.json().project.references[0].captureProvenance.captureId).toBe(captureId);
+    expect(accepted.json().project.surfaceTexts[0]).toMatchObject({ value: 'POCARI SWEAT', renderingMethod: 'hybrid-decal' });
+    expect(accepted.json().project.captures[0].status).toBe('ready');
+    await app.close();
+  });
+
   it('creates, captures, drafts, activates, previews, and exports a project', async () => {
     const store = new ProjectStore(resolve(temporaryDirectory, 'projects'));
     const app = await createApp({ store });

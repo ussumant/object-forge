@@ -32,6 +32,74 @@ export type CropRect = {
   height: number;
 };
 
+export const CAPTURE_STATUSES = ['queued', 'processing', 'needs_review', 'ready', 'failed', 'canceled'] as const;
+export type CaptureStatus = (typeof CAPTURE_STATUSES)[number];
+
+export type NormalizedRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type CaptureFrame = {
+  id: string;
+  filename: string;
+  timestampMs: number;
+  width: number;
+  height: number;
+  sharpness: number;
+  exposure: number;
+  diversity: number;
+  selected: boolean;
+  assignedRole?: ReferenceRole;
+  confidence?: number;
+};
+
+export type DetectedSurfaceText = {
+  id: string;
+  value: string;
+  frameId: string;
+  confidence: number;
+  bounds?: NormalizedRect;
+};
+
+export type CaptureAnalysis = {
+  summary: string;
+  warnings: string[];
+  requestedViews: ReferenceRole[];
+  detectedTexts: DetectedSurfaceText[];
+};
+
+export type VideoCapture = {
+  id: string;
+  provider: Provider;
+  status: CaptureStatus;
+  originalFilename: string;
+  storedFilename: string;
+  mimeType: 'video/mp4' | 'video/quicktime' | 'video/webm';
+  bytes: number;
+  durationMs?: number;
+  width?: number;
+  height?: number;
+  frames: CaptureFrame[];
+  analysis?: CaptureAnalysis;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SurfaceTextEvidence = {
+  id: string;
+  value: string;
+  frameId: string;
+  captureId: string;
+  bounds?: NormalizedRect;
+  renderingMethod: 'hybrid-decal' | 'generated-text';
+  exportAllowed: boolean;
+  assetFilename?: string;
+};
+
 export type ReferenceImage = {
   id: string;
   role: ReferenceRole;
@@ -44,6 +112,11 @@ export type ReferenceImage = {
   height: number;
   crop?: CropRect;
   warnings: string[];
+  captureProvenance?: {
+    captureId: string;
+    frameId: string;
+    timestampMs: number;
+  };
   createdAt: string;
 };
 
@@ -72,6 +145,7 @@ export type GenerationRun = {
   providerSessionId?: string;
   feedback?: string;
   acceptApproximation?: boolean;
+  autoFinish?: boolean;
   artifacts: RunArtifact[];
   messages: string[];
   error?: string;
@@ -86,6 +160,8 @@ export type CreatorProject = {
   name: string;
   slug: string;
   references: ReferenceImage[];
+  captures: VideoCapture[];
+  surfaceTexts: SurfaceTextEvidence[];
   suitability: SuitabilityReport;
   runs: GenerationRun[];
   activeRunId?: string;
@@ -116,6 +192,7 @@ export type StartRunInput = {
   sourceRunId?: string;
   feedback?: string;
   acceptApproximation?: boolean;
+  autoFinish?: boolean;
 };
 
 export type RunContext = {
