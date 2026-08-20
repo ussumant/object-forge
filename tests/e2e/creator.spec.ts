@@ -40,6 +40,7 @@ test('video capture selects views, confirms text, and completes a guided build',
   await page.getByRole('button', { name: 'Create 3D model' }).click();
   await expect(page.getByText(/finish · Codex/i)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/active model ready/i)).toBeVisible({ timeout: 20_000 });
+  await page.screenshot({ path: `output/playwright/studio-${test.info().project.name}.png`, fullPage: true });
   expect(consoleErrors).toEqual([]);
 });
 
