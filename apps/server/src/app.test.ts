@@ -166,7 +166,10 @@ describe('local creator API', () => {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
       const response = await app.inject({ method: 'GET', url: `/api/projects/${projectId}` });
       project = response.json().project;
-      if (project?.runs.find((run) => run.id === runId)?.status === 'succeeded') break;
+      if (
+        project?.runs.find((run) => run.id === runId)?.status === 'succeeded'
+        && project.activeRunId === runId
+      ) break;
     }
     expect(project?.activeRunId).toBe(runId);
 
@@ -183,7 +186,10 @@ describe('local creator API', () => {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
       const response = await app.inject({ method: 'GET', url: `/api/projects/${projectId}` });
       project = response.json().project;
-      if (project?.runs.find((run) => run.id === finishRunId)?.status === 'succeeded') break;
+      if (
+        project?.runs.find((run) => run.id === finishRunId)?.status === 'succeeded'
+        && project.activeRunId === finishRunId
+      ) break;
     }
     const finishRun = project?.runs.find((run) => run.id === finishRunId);
     expect(finishRun?.status, finishRun?.error).toBe('succeeded');

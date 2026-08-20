@@ -6,6 +6,22 @@ A local, desktop-first image-to-3D creator that turns object videos or photos in
 
 The application vendors [`hoainho/img2threejs`](https://github.com/hoainho/img2threejs) at commit [`a2907eb`](https://github.com/hoainho/img2threejs/commit/a2907eb5b0d00d6792150948f904eb901dc202c4) and wraps its agent-guided reconstruction process in a persistent creator UI.
 
+## How it works
+
+Create a local object project, upload one slow phone orbit or a set of photos, then inspect and refine the generated Three.js model.
+
+![Create an Object Forge project](docs/screenshots/library-desktop-chromium.png)
+
+The guided capture works on mobile-sized screens and keeps individual photos available as a first-class alternative.
+
+<p align="center">
+  <img src="docs/screenshots/video-entry-mobile-chromium.png" alt="Upload an object video or individual photos from the mobile capture panel" width="360">
+</p>
+
+After the draft and finish passes succeed, the studio shows the selected evidence, orbitable model, active run, refinement controls, and export action together.
+
+![Inspect and refine a completed procedural Three.js model](docs/screenshots/studio-desktop-chromium.png)
+
 ## What v1 includes
 
 - Project library and recoverable run history stored locally under `data/projects/`.

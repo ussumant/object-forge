@@ -27,3 +27,10 @@ jobs:
       - run: npm run test:e2e
         env:
           IMG3D_FAKE_PROVIDER: "1"
+      - name: Upload rendered app screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: object-forge-screenshots
+          path: output/playwright/*.png
+          if-no-files-found: error
