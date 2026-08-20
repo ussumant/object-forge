@@ -240,6 +240,36 @@ export class ProjectStore {
     return project;
   }
 
+  async replaceEvidenceWithReference(projectId: string, reference: ReferenceImage): Promise<CreatorProject> {
+    const project = await this.getProject(projectId);
+    const previousReferences = [...project.references];
+    const previousCaptureIds = project.captures.map((capture) => capture.id);
+
+    project.references = [reference];
+    project.captures = [];
+    project.surfaceTexts = [];
+    project.suitability = {
+      verdict: reference.role === 'hero' ? 'conditional' : 'pending',
+      summary: reference.role === 'hero'
+        ? 'A single hero image can work, but hidden geometry will be inferred.'
+        : 'A hero image is required before generation.',
+      warnings: reference.warnings,
+      requestedViews: reference.role === 'hero' ? ['left', 'back'] : [],
+      acceptedApproximation: false,
+    };
+    await this.saveProject(project);
+
+    await Promise.all(previousReferences.flatMap((item) => (
+      [item.storedFilename, item.croppedFilename]
+        .filter((filename): filename is string => Boolean(filename))
+        .map((filename) => unlink(resolve(this.referencesDir(projectId), filename)).catch(() => undefined))
+    )));
+    await Promise.all(previousCaptureIds.map((captureId) => (
+      rm(this.captureDir(projectId, captureId), { recursive: true, force: true })
+    )));
+    return project;
+  }
+
   async removeReference(projectId: string, referenceId: string): Promise<CreatorProject> {
     assertSafeId(referenceId, 'reference id');
     const project = await this.getProject(projectId);

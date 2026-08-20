@@ -256,6 +256,8 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
   const [error, setError] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<Provider>('codex');
   const [uploadFile, setUploadFile] = useState<File>();
+  const [uploadReplacesEvidence, setUploadReplacesEvidence] = useState(false);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [showCaptureReview, setShowCaptureReview] = useState(false);
   const [autoOpenedCaptureId, setAutoOpenedCaptureId] = useState<string>();
@@ -270,6 +272,7 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
   const [startingRun, setStartingRun] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'evidence' | 'build' | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const pendingReplacement = useRef(false);
   const videoInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -342,17 +345,39 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
     }
   }, [providers, selectedProvider]);
 
-  const chooseFile = (file?: File) => {
+  const chooseFile = async (file?: File, replaceEvidence = false) => {
     if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      setError('Choose a PNG, JPEG, or WebP image.');
-      return;
-    }
     if (file.size > 20 * 1024 * 1024) {
       setError('Reference images must be 20 MB or smaller.');
       return;
     }
-    setUploadFile(file);
+    const isHeic = ['image/heic', 'image/heif'].includes(file.type) || /\.hei[cf]$/i.test(file.name);
+    if (!isHeic && !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setError('Choose a PNG, JPEG, WebP, HEIC, or HEIF image.');
+      return;
+    }
+    setPreparingPhoto(true);
+    setError('');
+    try {
+      let prepared = file;
+      if (isHeic) {
+        const { default: heic2any } = await import('heic2any');
+        const converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.94 });
+        const blob = Array.isArray(converted) ? converted[0] : converted;
+        if (!blob) throw new Error('The HEIC image did not contain a readable photo.');
+        prepared = new File(
+          [blob],
+          file.name.replace(/\.hei[cf]$/i, '') + '.jpg',
+          { type: 'image/jpeg', lastModified: file.lastModified },
+        );
+      }
+      setUploadReplacesEvidence(replaceEvidence);
+      setUploadFile(prepared);
+    } catch (reason) {
+      setError(`Could not prepare this photo. ${reason instanceof Error ? reason.message : String(reason)}`);
+    } finally {
+      setPreparingPhoto(false);
+    }
   };
 
   const chooseVideo = async (file?: File) => {
@@ -383,8 +408,9 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
 
   const uploadReference = async (role: ReferenceRole, crop?: { x: number; y: number; width: number; height: number }) => {
     if (!uploadFile) return;
-    await api.uploadReference(projectId, uploadFile, role, crop);
+    await api.uploadReference(projectId, uploadFile, role, crop, uploadReplacesEvidence);
     setUploadFile(undefined);
+    setUploadReplacesEvidence(false);
     await refresh();
   };
 
@@ -528,21 +554,36 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
               </button>
             ))}
           </div>
-          {project.references.length < 8 && (
-            <details className="photo-capture-advanced">
-              <summary>Advanced: add individual photos</summary>
-              <button className="add-reference" onClick={() => fileInput.current?.click()}>
-                <ImagePlus size={20} />
-                <span><strong>Add another view</strong><small>PNG, JPEG or WebP · max 20 MB</small></span>
-              </button>
-            </details>
-          )}
+          <section className="photo-capture-card">
+            <div>
+              <strong>Use individual photos</strong>
+              <small>{project.references.length >= 8 ? 'Replace the incorrect capture pack' : 'Video is optional'}</small>
+            </div>
+            <button
+              className="add-reference"
+              disabled={preparingPhoto}
+              onClick={() => {
+                pendingReplacement.current = project.references.length >= 8;
+                fileInput.current?.click();
+              }}
+            >
+              {preparingPhoto ? <LoaderCircle className="spin" size={20} /> : <ImagePlus size={20} />}
+              <span>
+                <strong>{preparingPhoto ? 'Preparing photo…' : project.references.length >= 8 ? 'Replace current evidence' : 'Add a photo'}</strong>
+                <small>PNG, JPEG, WebP or iPhone HEIC · max 20 MB</small>
+              </span>
+            </button>
+          </section>
           <input
             ref={fileInput}
             className="visually-hidden"
             type="file"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value = ''; }}
+            accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif"
+            onChange={(event) => {
+              void chooseFile(event.target.files?.[0], pendingReplacement.current);
+              pendingReplacement.current = false;
+              event.target.value = '';
+            }}
           />
           <div className={`suitability-card ${project.suitability.verdict}`}>
             <div>
@@ -687,8 +728,9 @@ function ProjectStudio({ projectId, providers }: { projectId: string; providers:
       {uploadFile && (
         <UploadModal
           file={uploadFile}
-          initialRole={hero ? 'left' : 'hero'}
-          onClose={() => setUploadFile(undefined)}
+          initialRole={uploadReplacesEvidence || !hero ? 'hero' : 'left'}
+          replacementCount={uploadReplacesEvidence ? project.references.length : 0}
+          onClose={() => { setUploadFile(undefined); setUploadReplacesEvidence(false); }}
           onSubmit={uploadReference}
         />
       )}

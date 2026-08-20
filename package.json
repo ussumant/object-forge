@@ -2,6 +2,11 @@
   "name": "image-to-3d-creator",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ussumant/object-forge.git"
+  },
   "type": "module",
   "workspaces": [
     "apps/*",
@@ -19,9 +24,9 @@
     "start": "npm run start -w @img3d/server"
   },
   "devDependencies": {
-    "@playwright/test": "latest",
+    "@playwright/test": "^1.61.1",
     "@types/node": "latest",
     "typescript": "latest",
-    "vitest": "latest"
+    "vitest": "^4.1.11"
   }
 }

@@ -280,9 +280,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .add-reference > span { display: flex; flex-direction: column; gap: 3px; }
 .add-reference strong { font-size: 10px; }
 .add-reference small { color: var(--muted); font-size: 8px; }
-.photo-capture-advanced { margin: 9px 13px 0; }
-.photo-capture-advanced summary { color: var(--muted); font: 400 8px/1.4 var(--font-mono); cursor: pointer; }
-.photo-capture-advanced .add-reference { width: 100%; margin: 9px 0 0; }
+.photo-capture-card { margin: 11px 13px 0; padding-top: 11px; border-top: 1px solid var(--line); }
+.photo-capture-card > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.photo-capture-card > div strong { color: var(--text-2); font-size: 9px; }
+.photo-capture-card > div small { color: var(--faint); font: 400 7px/1.4 var(--font-mono); text-align: right; }
+.photo-capture-card .add-reference { width: 100%; margin: 9px 0 0; }
+.photo-capture-card .add-reference:disabled { opacity: .55; cursor: wait; }
 .suitability-card { margin: 15px 13px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
 .suitability-card > div { display: flex; align-items: center; gap: 8px; }
 .suitability-card strong { font-size: 10px; font-weight: 600; text-transform: capitalize; }

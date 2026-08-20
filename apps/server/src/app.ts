@@ -89,12 +89,15 @@ export async function createApp(options: { store?: ProjectStore; captureProcesso
 
   app.post<{ Params: { id: string } }>('/api/projects/:id/references', async (request, reply) => {
     const project = await store.getProject(request.params.id);
-    if (project.references.length >= 8) throw new Error('A project can contain at most eight reference images.');
     const upload = await request.file();
     if (!upload) throw new Error('Attach one image file.');
     const role = fieldValue(upload.fields as Record<string, unknown>, 'role');
+    const replaceEvidence = fieldValue(upload.fields as Record<string, unknown>, 'replaceEvidence') === 'true';
     if (!isReferenceRole(role)) throw new Error('Choose a valid reference role.');
-    if (role === 'hero' && project.references.some((item) => item.role === 'hero')) {
+    if (!replaceEvidence && project.references.length >= 8) {
+      throw new Error('This project already has eight views. Choose “Replace current evidence” to start with a new object.');
+    }
+    if (!replaceEvidence && role === 'hero' && project.references.some((item) => item.role === 'hero')) {
       throw new Error('This project already has a hero image.');
     }
     if (!uploadMimeTypes.has(upload.mimetype)) throw new Error('Only PNG, JPEG, and WebP images are supported.');
@@ -143,7 +146,9 @@ export async function createApp(options: { store?: ProjectStore; captureProcesso
       warnings,
       createdAt: new Date().toISOString(),
     };
-    const updated = await store.addReference(project.id, reference);
+    const updated = replaceEvidence
+      ? await store.replaceEvidenceWithReference(project.id, reference)
+      : await store.addReference(project.id, reference);
     return reply.code(201).send({ project: updated, reference });
   });
 

@@ -209,4 +209,45 @@ describe('local creator API', () => {
     expect(archive.rawPayload.byteLength).toBeGreaterThan(1_000);
     await app.close();
   });
+
+  it('atomically replaces a full evidence pack with a validated photo', async () => {
+    const store = new ProjectStore(resolve(temporaryDirectory, 'replacement-projects'));
+    const app = await createApp({ store });
+    const created = await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Wrong object' } });
+    const projectId = created.json().project.id as string;
+    const image = await sharp({ create: { width: 800, height: 600, channels: 3, background: '#6f7377' } }).png().toBuffer();
+    const roles = ['hero', 'front', 'back', 'left', 'right', 'top', 'detail', 'detail'];
+
+    for (const [index, role] of roles.entries()) {
+      const boundary = `full-pack-${index}`;
+      const uploaded = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectId}/references`,
+        headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+        payload: multipart(boundary, { role }, image, `wrong-${index}.png`),
+      });
+      expect(uploaded.statusCode).toBe(201);
+    }
+
+    const replacementBoundary = 'replacement-photo';
+    const replaced = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/references`,
+      headers: { 'content-type': `multipart/form-data; boundary=${replacementBoundary}` },
+      payload: multipart(
+        replacementBoundary,
+        { role: 'hero', replaceEvidence: 'true' },
+        image,
+        'correct-object.png',
+      ),
+    });
+
+    expect(replaced.statusCode).toBe(201);
+    expect(replaced.json().project.references).toHaveLength(1);
+    expect(replaced.json().project.references[0].originalFilename).toBe('correct-object.png');
+    expect(replaced.json().project.captures).toEqual([]);
+    expect(replaced.json().project.surfaceTexts).toEqual([]);
+    expect(replaced.json().project.suitability.verdict).toBe('conditional');
+    await app.close();
+  });
 });

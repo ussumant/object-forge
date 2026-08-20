@@ -6,6 +6,7 @@ import type { ReferenceRole } from '@img3d/shared';
 type UploadModalProps = {
   file: File;
   initialRole: ReferenceRole;
+  replacementCount?: number;
   onClose: () => void;
   onSubmit: (role: ReferenceRole, crop?: Area) => Promise<void>;
 };
@@ -20,7 +21,7 @@ const roles: Array<{ value: ReferenceRole; label: string }> = [
   { value: 'detail', label: 'Material detail' },
 ];
 
-export function UploadModal({ file, initialRole, onClose, onSubmit }: UploadModalProps) {
+export function UploadModal({ file, initialRole, replacementCount = 0, onClose, onSubmit }: UploadModalProps) {
   const [url, setUrl] = useState('');
   const [role, setRole] = useState<ReferenceRole>(initialRole);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -86,10 +87,14 @@ export function UploadModal({ file, initialRole, onClose, onSubmit }: UploadModa
         </div>
         {error && <p className="inline-error">{error}</p>}
         <footer className="modal-actions">
-          <p>The original stays local. The marked crop becomes the primary evidence.</p>
+          <p>
+            {replacementCount > 0
+              ? `This validated photo will replace the ${replacementCount} current source views. Earlier model runs remain recoverable.`
+              : 'The original stays local. The marked crop becomes the primary evidence.'}
+          </p>
           <button className="primary-button" onClick={submit} disabled={submitting}>
             {submitting ? <span className="spinner" /> : <Check size={17} />}
-            {submitting ? 'Adding view…' : 'Add to capture pack'}
+            {submitting ? 'Adding view…' : replacementCount > 0 ? 'Replace evidence' : 'Add to capture pack'}
           </button>
         </footer>
       </div>

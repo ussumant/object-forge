@@ -2,6 +2,7 @@
   "name": "@img3d/web",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,19 +14,20 @@
     "@fontsource-variable/newsreader": "latest",
     "@fontsource/ibm-plex-mono": "latest",
     "@img3d/shared": "0.1.0",
-    "@react-three/drei": "latest",
-    "@react-three/fiber": "latest",
-    "lucide-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "react-easy-crop": "latest",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "heic2any": "^0.0.4",
+    "lucide-react": "^1.33.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-easy-crop": "^6.2.3",
     "three": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@types/three": "latest",
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest"
+    "@vitejs/plugin-react": "^6.1.0",
+    "vite": "^8.2.2"
   }
 }

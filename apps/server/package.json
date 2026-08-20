@@ -2,6 +2,7 @@
   "name": "@img3d/server",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -11,13 +12,13 @@
   },
   "dependencies": {
     "@fastify/cors": "latest",
-    "@fastify/multipart": "latest",
-    "@fastify/static": "latest",
+    "@fastify/multipart": "^10.1.1",
+    "@fastify/static": "^10.1.3",
     "@img3d/shared": "0.1.0",
     "archiver": "latest",
-    "esbuild": "latest",
-    "fastify": "latest",
-    "nanoid": "latest",
+    "esbuild": "^0.28.2",
+    "fastify": "^5.12.1",
+    "nanoid": "^6.0.1",
     "sharp": "latest",
     "zod": "latest"
   },

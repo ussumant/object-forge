@@ -1,13 +1,15 @@
-# Image to 3D Creator
+# Object Forge
 
-A local, desktop-first creator that turns one or more object photos into editable procedural Three.js code. It is designed for isolated hard-surface products and props: the result is a convincing, website-ready reconstruction, not photogrammetry or exact recovery of unseen geometry.
+[![CI](https://github.com/ussumant/object-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/ussumant/object-forge/actions/workflows/ci.yml)
+
+A local, desktop-first image-to-3D creator that turns object videos or photos into editable procedural Three.js code. It is designed for isolated hard-surface products and props: the result is a convincing, website-ready reconstruction, not photogrammetry or exact recovery of unseen geometry.
 
 The application vendors [`hoainho/img2threejs`](https://github.com/hoainho/img2threejs) at commit [`a2907eb`](https://github.com/hoainho/img2threejs/commit/a2907eb5b0d00d6792150948f904eb901dc202c4) and wraps its agent-guided reconstruction process in a persistent creator UI.
 
 ## What v1 includes
 
 - Project library and recoverable run history stored locally under `data/projects/`.
-- Recommended MOV, MP4, and WebM intake that extracts and ranks useful views locally, plus advanced PNG, JPEG, and WebP intake.
+- Recommended MOV, MP4, and WebM intake that extracts and ranks useful views locally, plus PNG, JPEG, WebP, HEIC, and HEIF photo intake.
 - Confirmed surface-text evidence and local hybrid decals so packaging words are not silently omitted during finishing.
 - Codex and Claude CLI adapters with startup health checks, resumable same-provider sessions, cancellation, event streaming, and a ten-minute inactivity detector.
 - Draft, finish, and prompted refinement runs in isolated workspaces.
@@ -58,7 +60,7 @@ Then open [http://127.0.0.1:4057](http://127.0.0.1:4057).
 4. Choose **Create 3D model**. The app validates geometry, then continues automatically through materials, confirmed text, and lighting.
 5. Orbit and compare the finished model, submit plain-language refinements when useful, and export the active run as a standalone ZIP.
 
-Individual photos remain available under the advanced capture control. A one-view reconstruction still requires explicit acknowledgement that hidden geometry will be inferred.
+Individual photos remain available as a first-class alternative. A full but incorrect capture pack can be replaced atomically after a new photo passes validation. A one-view reconstruction still requires explicit acknowledgement that hidden geometry will be inferred.
 
 Use evenly lit, sharp images with the whole silhouette visible. Front, back, side, and top views improve geometry; detail views are best for materials and small features. Glass-dominant objects, people, animals, scenes, and manufacturing-grade reconstruction are outside the v1 promise.
 
@@ -93,3 +95,15 @@ Generated model roots expose `root.userData.sculptRuntime`, and meaningful parts
 Projects, source videos, extracted frames, references, confirmed text, run logs, workspaces, generated artifacts, provider session identifiers, and activation state live in the gitignored `data/projects/` tree. Source videos and full photographs are never exported. A confirmed local label crop is included only when the generated model explicitly uses it.
 
 The app is intentionally local-only in v1: there are no accounts, billing, collaboration, public hosting, GLB export, or cloud persistence.
+
+## Contributing
+
+Bug reports and focused pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the reconstruction pipeline, provider process boundary, or generated-code safety rules.
+
+Routine tests use deterministic fake provider adapters and do not spend authenticated Codex or Claude usage. Live provider smoke runs must always be started deliberately.
+
+## License and attribution
+
+Object Forge is available under the [MIT License](LICENSE).
+
+The repository vendors `img2threejs` at the pinned commit linked above. That snapshot retains its original MIT license in [`vendor/img2threejs/LICENSE`](vendor/img2threejs/LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and upgrade guidance.

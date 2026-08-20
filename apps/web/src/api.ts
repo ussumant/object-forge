@@ -41,10 +41,17 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   }),
   deleteCapture: (projectId: string, captureId: string) => request<{ project: CreatorProject }>(`/api/projects/${projectId}/captures/${captureId}`, { method: 'DELETE' }),
-  uploadReference: (projectId: string, file: File, role: ReferenceRole, crop?: { x: number; y: number; width: number; height: number }) => {
+  uploadReference: (
+    projectId: string,
+    file: File,
+    role: ReferenceRole,
+    crop?: { x: number; y: number; width: number; height: number },
+    replaceEvidence = false,
+  ) => {
     const data = new FormData();
     data.append('role', role);
     if (crop) data.append('crop', JSON.stringify(crop));
+    if (replaceEvidence) data.append('replaceEvidence', 'true');
     data.append('file', file);
     return request<{ project: CreatorProject }>(`/api/projects/${projectId}/references`, { method: 'POST', body: data });
   },
